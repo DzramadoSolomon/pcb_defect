@@ -1,7 +1,7 @@
 import React, { useState, useRef } from 'react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Upload, ArrowLeft, Image as ImageIcon } from 'lucide-react';
+import { Upload, ArrowLeft, Image as ImageIcon, AlertCircle } from 'lucide-react';
 import { toast } from '@/components/ui/use-toast';
 import { predictDefect } from '@/utils/modelUtils';
 
@@ -16,11 +16,13 @@ interface PredictionResult {
   prediction: string;
   confidence: number;
   processing: boolean;
+  error?: string;
 }
 
 const TestPage: React.FC<TestPageProps> = ({ onBack }) => {
   const [results, setResults] = useState<PredictionResult[]>([]);
   const [isDragging, setIsDragging] = useState(false);
+  const [modelStatus, setModelStatus] = useState<'unknown' | 'loading' | 'ready' | 'error'>('unknown');
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const processFiles = async (files: FileList) => {
@@ -55,7 +57,9 @@ const TestPage: React.FC<TestPageProps> = ({ onBack }) => {
     // Process each image sequentially
     for (const result of newResults) {
       try {
+        setModelStatus('loading');
         const prediction = await predictDefect(result.file);
+        setModelStatus('ready');
         
         setResults(prev => prev.map(r => 
           r.id === result.id 
@@ -65,18 +69,21 @@ const TestPage: React.FC<TestPageProps> = ({ onBack }) => {
         
         toast({
           title: "Analysis Complete",
-          description: `${result.file.name}: ${prediction.prediction.replace('_', ' ')}`,
+          description: `${result.file.name}: ${prediction.prediction.replace('_', ' ')} (${(prediction.confidence * 100).toFixed(1)}%)`,
         });
       } catch (error) {
+        setModelStatus('error');
+        const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+        
         setResults(prev => prev.map(r => 
           r.id === result.id 
-            ? { ...r, prediction: 'Error', confidence: 0, processing: false }
+            ? { ...r, prediction: 'Error', confidence: 0, processing: false, error: errorMessage }
             : r
         ));
         
         toast({
           title: "Analysis Failed",
-          description: `Failed to analyze ${result.file.name}. Make sure the model is uploaded.`,
+          description: errorMessage,
           variant: "destructive"
         });
       }
@@ -110,6 +117,7 @@ const TestPage: React.FC<TestPageProps> = ({ onBack }) => {
   const clearResults = () => {
     results.forEach(result => URL.revokeObjectURL(result.imageUrl));
     setResults([]);
+    setModelStatus('unknown');
   };
 
   return (
@@ -133,6 +141,17 @@ const TestPage: React.FC<TestPageProps> = ({ onBack }) => {
               <p className="text-gray-600">
                 Upload PCB images to detect defects using the trained Keras model
               </p>
+              {modelStatus === 'error' && (
+                <div className="flex items-center gap-2 mt-2 text-red-600">
+                  <AlertCircle className="w-4 h-4" />
+                  <span className="text-sm">Model loading failed. Check console for details.</span>
+                </div>
+              )}
+              {modelStatus === 'ready' && (
+                <div className="flex items-center gap-2 mt-2 text-green-600">
+                  <span className="text-sm">✓ Model loaded successfully</span>
+                </div>
+              )}
             </div>
             
             {results.length > 0 && (
@@ -235,6 +254,11 @@ const TestPage: React.FC<TestPageProps> = ({ onBack }) => {
                             <span className="text-xs font-semibold text-green-600">
                               {(result.confidence * 100).toFixed(1)}%
                             </span>
+                          </div>
+                        )}
+                        {result.error && (
+                          <div className="text-xs text-red-600 mt-2">
+                            {result.error}
                           </div>
                         )}
                       </div>
